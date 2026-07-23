@@ -1,0 +1,113 @@
+name: Deploy Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component that triggered deployment
+        required: true
+        default: manual
+      image_tag:
+        description: Image tag to deploy
+        required: true
+        default: latest
+      source_repo:
+        description: Source repository
+        required: false
+        default: manual
+      source_sha:
+        description: Source commit SHA
+        required: false
+        default: manual
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Pull Images and Restart Stack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout deploy config
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          test -n "$SERVER_HOST" || { echo "::error::Set SERVER_HOST in the deploy repo secrets."; exit 1; }
+          test -n "$SERVER_USER" || { echo "::error::Set SERVER_USER in the deploy repo secrets."; exit 1; }
+          test -n "$SERVER_SSH_KEY" || { echo "::error::Set SERVER_SSH_KEY in the deploy repo secrets."; exit 1; }
+
+      - name: Prepare SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          port="${SERVER_PORT:-22}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/studymint_deploy_key
+          chmod 600 ~/.ssh/studymint_deploy_key
+          ssh-keyscan -p "$port" "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync deploy files
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_DEPLOY_PATH: ${{ secrets.SERVER_DEPLOY_PATH }}
+        run: |
+          port="${SERVER_PORT:-22}"
+          deploy_path="${SERVER_DEPLOY_PATH:-/opt/studymint-ai}"
+          scp -i ~/.ssh/studymint_deploy_key -P "$port" docker-compose.yml prepare-aws-ubuntu.sh setup-nginx-https.sh \
+            "$SERVER_USER@$SERVER_HOST:/tmp/"
+          ssh -i ~/.ssh/studymint_deploy_key -p "$port" "$SERVER_USER@$SERVER_HOST" \
+            "sudo mkdir -p '$deploy_path' && sudo mv /tmp/docker-compose.yml '$deploy_path/docker-compose.yml' && sudo mv /tmp/prepare-aws-ubuntu.sh '$deploy_path/prepare-aws-ubuntu.sh' && sudo mv /tmp/setup-nginx-https.sh '$deploy_path/setup-nginx-https.sh' && sudo chmod 640 '$deploy_path/docker-compose.yml' && sudo chmod 755 '$deploy_path/prepare-aws-ubuntu.sh' '$deploy_path/setup-nginx-https.sh'"
+
+      - name: GHCR login on server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          test -n "$GHCR_TOKEN" || { echo "::error::Set GHCR_TOKEN in the deploy repo secrets so the server can pull private GHCR images."; exit 1; }
+          test -n "$GHCR_USERNAME" || { echo "::error::Set GHCR_USERNAME when GHCR_TOKEN is set."; exit 1; }
+          port="${SERVER_PORT:-22}"
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/studymint_deploy_key -p "$port" "$SERVER_USER@$SERVER_HOST" \
+            "sudo docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+
+      - name: Pull images and restart Docker Compose
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_DEPLOY_PATH: ${{ secrets.SERVER_DEPLOY_PATH }}
+        run: |
+          port="${SERVER_PORT:-22}"
+          deploy_path="${SERVER_DEPLOY_PATH:-/opt/studymint-ai}"
+          ssh -i ~/.ssh/studymint_deploy_key -p "$port" "$SERVER_USER@$SERVER_HOST" \
+            "sudo sh -c \"cd '$deploy_path' && docker compose config >/dev/null && docker compose pull && docker compose up -d && docker compose ps && docker compose run --rm backend python -m alembic upgrade head\""
+
+      - name: Show Docker Compose logs on failure
+        if: failure()
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_DEPLOY_PATH: ${{ secrets.SERVER_DEPLOY_PATH }}
+        run: |
+          port="${SERVER_PORT:-22}"
+          deploy_path="${SERVER_DEPLOY_PATH:-/opt/studymint-ai}"
+          ssh -i ~/.ssh/studymint_deploy_key -p "$port" "$SERVER_USER@$SERVER_HOST" \
+            "sudo sh -c \"cd '$deploy_path' && docker compose logs --tail=120 migrate backend db\""

@@ -1,0 +1,1 @@
+"""StudyMint AI backend package."""

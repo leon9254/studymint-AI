@@ -1,0 +1,253 @@
+{
+  "name": "StudyMint Stuvia Agent Review",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "Import this workflow and copy the production webhook URL into N8N_STUVIA_WEBHOOK_URL. Tenants connect Stuvia in StudyMint only. StudyMint stores the Stuvia password encrypted and sends a private credential lookup URL to the publisher. This workflow acknowledges StudyMint immediately, then runs browser publishing in the background.",
+        "height": 180,
+        "width": 300
+      },
+      "id": "b2fdf56d-668f-452a-92f1-0f0f3b105a8d",
+      "name": "Account setup checkpoint",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "studymint/stuvia-agent-review",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "67cebbf0-286a-4bce-a25c-73f7e9e7e5f2",
+      "name": "Listing package webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        0
+      ],
+      "webhookId": "studymint-stuvia-agent-review"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "tenant-id",
+              "name": "tenant_id",
+              "type": "string",
+              "value": "={{ $json.tenant_id || $json.body?.tenant_id || '' }}"
+            },
+            {
+              "id": "run-id",
+              "name": "run_id",
+              "type": "string",
+              "value": "={{ $json.run_id || $json.body?.run_id || '' }}"
+            },
+            {
+              "id": "review-required",
+              "name": "review_required",
+              "type": "boolean",
+              "value": "={{ ($json.review_required ?? $json.body?.review_required) !== false }}"
+            },
+            {
+              "id": "posting-policy",
+              "name": "posting_policy",
+              "type": "string",
+              "value": "={{ $json.posting_policy || $json.body?.posting_policy || 'Human review or authorized Stuvia API posting only' }}"
+            },
+            {
+              "id": "publish-mode",
+              "name": "publish_mode",
+              "type": "string",
+              "value": "={{ $json.publish_mode || $json.body?.publish_mode || 'n8n_review' }}"
+            },
+            {
+              "id": "auto-publish",
+              "name": "auto_publish_requested",
+              "type": "boolean",
+              "value": "={{ $json.auto_publish_requested === true || $json.body?.auto_publish_requested === true }}"
+            },
+            {
+              "id": "manual-publish",
+              "name": "manual_publish_requested",
+              "type": "boolean",
+              "value": "={{ $json.manual_publish_requested === true || $json.body?.manual_publish_requested === true }}"
+            },
+            {
+              "id": "credential-name",
+              "name": "stuvia_credential_name",
+              "type": "string",
+              "value": "={{ $json.stuvia_credential_name || $json.body?.stuvia_credential_name || 'Stuvia Account' }}"
+            },
+            {
+              "id": "credential-storage",
+              "name": "credential_storage",
+              "type": "string",
+              "value": "={{ $json.credential_storage || $json.body?.credential_storage || 'backend_encrypted' }}"
+            },
+            {
+              "id": "credential-lookup-url",
+              "name": "credential_lookup_url",
+              "type": "string",
+              "value": "={{ $json.credential_lookup_url || $json.body?.credential_lookup_url || '' }}"
+            },
+            {
+              "id": "publisher-url",
+              "name": "browser_publisher_url",
+              "type": "string",
+              "value": "={{ $json.browser_publisher_url || $json.body?.browser_publisher_url || '' }}"
+            },
+            {
+              "id": "listings",
+              "name": "listings",
+              "type": "array",
+              "value": "={{ $json.listings || $json.body?.listings || [] }}"
+            },
+            {
+              "id": "topics",
+              "name": "topics",
+              "type": "array",
+              "value": "={{ $json.topics || $json.body?.topics || [] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "87d1957c-5104-426c-9220-6ab1da8700ee",
+      "name": "Prepare review package",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.auto_publish_requested || $json.manual_publish_requested }}",
+              "value2": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c7944ab5-f363-441c-924c-b58a64faf4fd",
+      "name": "Publish requested?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ (($json.browser_publisher_url || '').trim()) || (($env.STUVIA_BROWSER_PUBLISHER_URL || '').trim()) || 'http://stuvia-publisher:8787/publish/async' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.N8N_STUVIA_WEBHOOK_TOKEN ? 'Bearer ' + $env.N8N_STUVIA_WEBHOOK_TOKEN : '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $json.run_id, tenant_id: $json.tenant_id, listings: $json.listings, topics: $json.topics, posting_policy: $json.posting_policy, credential_storage: $json.credential_storage, credential_lookup_url: $json.credential_lookup_url, auto_publish_requested: $json.auto_publish_requested, manual_publish_requested: $json.manual_publish_requested }) }}",
+        "options": {}
+      },
+      "id": "aa592bc2-c956-45f7-b4dc-234bfe7440e8",
+      "name": "Auto-publish with Stuvia Account",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        -100
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, run_id: $json.run_id, review_required: $json.review_required, auto_publish_requested: $json.auto_publish_requested, manual_publish_requested: $json.manual_publish_requested, posting_policy: $json.posting_policy } }}",
+        "options": {}
+      },
+      "id": "49e44012-fb87-4c39-bac0-90b7cb138c93",
+      "name": "Respond to StudyMint",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        760,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Listing package webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare review package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare review package": {
+      "main": [
+        [
+          {
+            "node": "Respond to StudyMint",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish requested?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish requested?": {
+      "main": [
+        [
+          {
+            "node": "Auto-publish with Stuvia Account",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+        ]
+      ]
+    },
+    "Auto-publish with Stuvia Account": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b50d56c7-f055-45d2-8b48-76b5fe8b3990",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,49 @@
+name: Promote Dev to Main
+
+on:
+  workflow_run:
+    workflows:
+      - Backend CI
+    types:
+      - completed
+    branches:
+      - dev
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  promote:
+    name: Promote Tested Dev
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.CI_PROMOTION_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Validate promotion token
+        env:
+          CI_PROMOTION_TOKEN: ${{ secrets.CI_PROMOTION_TOKEN }}
+        run: test -n "$CI_PROMOTION_TOKEN" || { echo "::error::Set CI_PROMOTION_TOKEN so this workflow can promote dev to main."; exit 1; }
+
+      - name: Fast-forward main from dev
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          git push origin HEAD:main
+
+      - name: Build image from main
+        env:
+          GH_TOKEN: ${{ secrets.CI_PROMOTION_TOKEN }}
+        run: gh workflow run docker-publish.yml --ref main

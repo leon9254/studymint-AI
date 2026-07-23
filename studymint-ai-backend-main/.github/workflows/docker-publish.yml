@@ -1,0 +1,80 @@
+name: Publish Backend Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - ".bootstrap"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prepare:
+    name: Prepare Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      owner_lc: ${{ steps.owner.outputs.owner_lc }}
+    steps:
+      - name: Lowercase owner
+        id: owner
+        shell: bash
+        run: echo "owner_lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build and Push Backend
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.prepare.outputs.owner_lc }}/studymint-ai-backend
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger server update
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          DEPLOY_REPO: StudyMint-AI/studymint-ai-deploy
+        run: |
+          test -n "$GH_TOKEN" || { echo "::error::Set DEPLOY_REPO_TOKEN so this repo can dispatch the deploy workflow."; exit 1; }
+          gh workflow run deploy-server.yml \
+            --repo "$DEPLOY_REPO" \
+            --ref main \
+            -f component=backend \
+            -f image_tag=latest \
+            -f source_repo="${GITHUB_REPOSITORY}" \
+            -f source_sha="${GITHUB_SHA}"

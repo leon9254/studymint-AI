@@ -1,0 +1,202 @@
+name: studymint-ai
+
+x-backend-env: &backend-env
+  APP_NAME: ${APP_NAME:-StudyMint AI}
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+  SECRET_KEY: ${SECRET_KEY:-change-me-before-production}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:8080}
+  BACKEND_CORS_ORIGIN_REGEX: ${BACKEND_CORS_ORIGIN_REGEX:-}
+  BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL:-http://backend:8000}
+  FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:8080}
+  EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: ${EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS:-24}
+  PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: ${PASSWORD_RESET_TOKEN_EXPIRE_MINUTES:-60}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-465}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-info@marketing.ainexis.tech}
+  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-StudyMint AI}
+  SMTP_USE_SSL: ${SMTP_USE_SSL:-true}
+  SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-false}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
+  OPENAI_GUARDRAIL_MODEL: ${OPENAI_GUARDRAIL_MODEL:-gpt-4.1-mini}
+  OPENAI_GUARDRAIL_MAX_OUTPUT_TOKENS: ${OPENAI_GUARDRAIL_MAX_OUTPUT_TOKENS:-12000}
+  OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-high}
+  OPENAI_TEXT_VERBOSITY: ${OPENAI_TEXT_VERBOSITY:-medium}
+  OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+  OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-180}
+  OPENAI_MAX_OUTPUT_TOKENS: ${OPENAI_MAX_OUTPUT_TOKENS:-24000}
+  OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-3}
+  OPENAI_RETRY_BACKOFF_SECONDS: ${OPENAI_RETRY_BACKOFF_SECONDS:-2.0}
+  STUVIA_AGENT_DEFAULT_PROFILE_URL: ${STUVIA_AGENT_DEFAULT_PROFILE_URL:-https://www.stuvia.com/user/casewritters}
+  STUVIA_SCRAPE_TIMEOUT_SECONDS: ${STUVIA_SCRAPE_TIMEOUT_SECONDS:-15}
+  STUVIA_SCRAPE_PAGE_LIMIT: ${STUVIA_SCRAPE_PAGE_LIMIT:-14}
+  STUVIA_AGENT_MAX_CONCURRENCY: ${STUVIA_AGENT_MAX_CONCURRENCY:-10}
+  STUVIA_AGENT_GENERATION_ATTEMPTS: ${STUVIA_AGENT_GENERATION_ATTEMPTS:-3}
+  STUVIA_AGENT_RECOVERY_CONCURRENCY: ${STUVIA_AGENT_RECOVERY_CONCURRENCY:-1}
+  STUVIA_AGENT_RETRY_BACKOFF_SECONDS: ${STUVIA_AGENT_RETRY_BACKOFF_SECONDS:-2.0}
+  STUVIA_AGENT_USE_LLM_RANKER: ${STUVIA_AGENT_USE_LLM_RANKER:-false}
+  STUVIA_AGENT_FAST_BATCH_SIZE: ${STUVIA_AGENT_FAST_BATCH_SIZE:-30}
+  N8N_STUVIA_WEBHOOK_URL: ${N8N_STUVIA_WEBHOOK_URL:-}
+  N8N_STUVIA_WEBHOOK_TOKEN: ${N8N_STUVIA_WEBHOOK_TOKEN:-replace-with-a-long-random-stuvia-token}
+  N8N_STUVIA_WEBHOOK_TIMEOUT_SECONDS: ${N8N_STUVIA_WEBHOOK_TIMEOUT_SECONDS:-45}
+  STUVIA_BROWSER_PUBLISHER_URL: ${STUVIA_BROWSER_PUBLISHER_URL:-http://stuvia-publisher:8787/publish/async}
+  PDF_EXPORT_BASE_URL: /exports
+  PDF_EXPORT_DIR: /app/exports
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-studymint}:${POSTGRES_PASSWORD:-studymint}@db:5432/${POSTGRES_DB:-studymint}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-studymint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studymint}
+      POSTGRES_DB: ${POSTGRES_DB:-studymint}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-studymint} -d ${POSTGRES_DB:-studymint}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: ghcr.io/${GHCR_OWNER:-your-github-username-or-org}/studymint-ai-backend:${IMAGE_TAG:-latest}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+    command: ["alembic", "upgrade", "head"]
+
+  backend:
+    image: ghcr.io/${GHCR_OWNER:-your-github-username-or-org}/studymint-ai-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *backend-env
+    volumes:
+      - backend_exports:/app/exports
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER:-your-github-username-or-org}/studymint-ai-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_BIND:-0.0.0.0}:${APP_PORT:-8080}:80"
+
+  stuvia-publisher:
+    image: ghcr.io/${GHCR_OWNER:-your-github-username-or-org}/studymint-ai-stuvia-publisher:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    profiles:
+      - automation
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_BASE_URL: http://backend:8000
+      N8N_STUVIA_WEBHOOK_TOKEN: ${N8N_STUVIA_WEBHOOK_TOKEN:-replace-with-a-long-random-stuvia-token}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_FAST_MODEL:-gpt-4.1-mini}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-90}
+      STUVIA_LOGIN_URL: ${STUVIA_LOGIN_URL:-https://www.stuvia.com/login}
+      STUVIA_UPLOAD_URL: ${STUVIA_UPLOAD_URL:-https://www.stuvia.com/upload}
+      STUVIA_DEFAULT_COUNTRY: ${STUVIA_DEFAULT_COUNTRY:-United States}
+      STUVIA_DEFAULT_INSTITUTION: ${STUVIA_DEFAULT_INSTITUTION:-Galen College of Nursing}
+      STUVIA_DEFAULT_PRICE: ${STUVIA_DEFAULT_PRICE:-9.99}
+      STUVIA_MIN_PRICE: ${STUVIA_MIN_PRICE:-4.99}
+      STUVIA_MAX_PRICE: ${STUVIA_MAX_PRICE:-24.99}
+      STUVIA_PUBLISHER_DRY_RUN: ${STUVIA_PUBLISHER_DRY_RUN:-false}
+      STUVIA_PUBLISHER_HEADLESS: ${STUVIA_PUBLISHER_HEADLESS:-true}
+      STUVIA_PUBLISHER_NAVIGATION_TIMEOUT_MS: ${STUVIA_PUBLISHER_NAVIGATION_TIMEOUT_MS:-30000}
+      STUVIA_PUBLISHER_FORM_TIMEOUT_MS: ${STUVIA_PUBLISHER_FORM_TIMEOUT_MS:-10000}
+      STUVIA_PUBLISHER_LISTING_TIMEOUT_SECONDS: ${STUVIA_PUBLISHER_LISTING_TIMEOUT_SECONDS:-150}
+      STUVIA_PUBLISHER_FILESTACK_TIMEOUT_SECONDS: ${STUVIA_PUBLISHER_FILESTACK_TIMEOUT_SECONDS:-45}
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=3).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  n8n-seed:
+    image: n8nio/n8n:${N8N_IMAGE_TAG:-1.98.2}
+    restart: "no"
+    profiles:
+      - automation
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-replace-with-a-long-random-n8n-key}
+      N8N_RUNNERS_ENABLED: ${N8N_RUNNERS_ENABLED:-true}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/opt/studymint-workflows:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        workflow_id="$$(n8n list:workflow | awk -F'|' '/StudyMint Stuvia Agent Review/{print $$1; exit}')"
+        if [ -n "$$workflow_id" ]; then
+          node /opt/studymint-workflows/sync-workflow.js /opt/studymint-workflows/stuvia-agent-review.n8n.json
+        else
+          n8n import:workflow --input=/opt/studymint-workflows/stuvia-agent-review.n8n.json
+          workflow_id="$$(n8n list:workflow | awk -F'|' '/StudyMint Stuvia Agent Review/{print $$1; exit}')"
+        fi
+        if [ -n "$$workflow_id" ]; then
+          n8n update:workflow --id="$$workflow_id" --active=true
+        else
+          echo "StudyMint Stuvia workflow could not be found after import." >&2
+          exit 1
+        fi
+
+  n8n:
+    image: n8nio/n8n:${N8N_IMAGE_TAG:-1.98.2}
+    restart: unless-stopped
+    profiles:
+      - automation
+    depends_on:
+      n8n-seed:
+        condition: service_completed_successfully
+      stuvia-publisher:
+        condition: service_healthy
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_PUBLIC_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-replace-with-a-long-random-n8n-key}
+      N8N_RUNNERS_ENABLED: ${N8N_RUNNERS_ENABLED:-true}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-replace-with-a-strong-password}
+      N8N_STUVIA_WEBHOOK_TOKEN: ${N8N_STUVIA_WEBHOOK_TOKEN:-replace-with-a-long-random-stuvia-token}
+      STUVIA_BROWSER_PUBLISHER_URL: ${STUVIA_BROWSER_PUBLISHER_URL:-http://stuvia-publisher:8787/publish/async}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "${N8N_BIND:-127.0.0.1}:${N8N_PORT:-5678}:5678"
+
+volumes:
+  postgres_data:
+  backend_exports:
+  n8n_data:

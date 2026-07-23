@@ -1,0 +1,44 @@
+name: Deploy Config CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Compose and Scripts
+    runs-on: ubuntu-latest
+    env:
+      GHCR_OWNER: studymint-ai
+      IMAGE_TAG: latest
+      APP_PORT: "8080"
+      POSTGRES_USER: studymint
+      POSTGRES_PASSWORD: ci-postgres-password
+      POSTGRES_DB: studymint
+      ENVIRONMENT: production
+      SECRET_KEY: ci-secret-key
+      BACKEND_CORS_ORIGINS: http://localhost:8080
+      BACKEND_CORS_ORIGIN_REGEX: ""
+      OPENAI_API_KEY: ci-openai-key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check deployment script syntax
+        run: bash -n prepare-aws-ubuntu.sh
+
+      - name: Check Nginx setup script syntax
+        run: bash -n setup-nginx-https.sh
+
+      - name: Validate Docker Compose config
+        run: docker compose -f docker-compose.yml config

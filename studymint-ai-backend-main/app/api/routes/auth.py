@@ -22,6 +22,7 @@ from app.services.auth_service import (
     VerificationError,
     authenticate_user,
     build_auth_response,
+    build_registration_response,
     register_workspace,
     request_password_reset,
     reset_password,
@@ -58,17 +59,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Account verification email could not be sent. Please try again later.",
         ) from exc
-    if user.email_verified:
-        return {
-            "message": "Account created. Email delivery is not configured in this environment, so the account was verified automatically.",
-            "email": user.email,
-            "requires_email_verification": False,
-        }
-    return {
-        "message": "Verification email sent. Check your inbox before signing in.",
-        "email": user.email,
-        "requires_email_verification": True,
-    }
+    return build_registration_response(user)
 
 
 @router.post("/verify-email", response_model=AuthResponse)

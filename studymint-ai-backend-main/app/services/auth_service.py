@@ -211,6 +211,21 @@ def verify_email_token(db: Session, token: str) -> User:
     return user
 
 
+def build_registration_response(user: User) -> dict[str, object]:
+    if user.email_verified:
+        return {
+            "message": "Account created successfully. Your account is ready to use. You can sign in now.",
+            "email": user.email,
+            "requires_email_verification": False,
+        }
+
+    return {
+        "message": "Account created. Please check your email to verify your account before signing in.",
+        "email": user.email,
+        "requires_email_verification": True,
+    }
+
+
 def build_auth_response(user: User) -> dict:
     token = create_access_token(subject=user.id, additional_claims={"tenant_id": user.tenant_id, "role": user.role})
     return {"access_token": token, "token_type": "bearer", "user": user}

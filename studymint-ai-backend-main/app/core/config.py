@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     SECRET_KEY: str = "change-me-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
-    DATABASE_URL: str = "postgresql+psycopg://studymint:studymint@localhost:55432/studymint"
+    DATABASE_URL: str = "sqlite:///./studymint.db"
     BACKEND_CORS_ORIGINS: str = "http://127.0.0.1:5173,http://localhost:5173"
     BACKEND_CORS_ORIGIN_REGEX: str = r"^https?://(localhost|127[.]0[.]0[.]1):[0-9]+$"
     BACKEND_PUBLIC_URL: str = "http://127.0.0.1:8000"
